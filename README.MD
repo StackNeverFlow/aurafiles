@@ -19,8 +19,8 @@ learning Go.
 
 3) Copy `example.env`, rename to `.env` and change all data:
 
-- `BACKEND_PORT` The port under which the server will be accessible
-- `FROTEND_PORT` The port under which the frontend will be accessible
+- `BACKEND_PORT` The port under which the server will be accessible (default is 8000)
+- `FRONTEND_PORT` The port under which the frontend will be accessible (default is 8080)
 - `MONGO_CONNECTION_URL` The url on which the mongo database is located
 - `SECRET_USERNAME` The secret username used to authenticate requests (default is "Admin")
 - `SECRET_PASSWORD` The secret password used to authenticate requests (default is "12345")
