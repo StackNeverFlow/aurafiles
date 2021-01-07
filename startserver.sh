@@ -1,1 +1,1 @@
-screen -S AuraFilesAPI go run *.go
+screen -S AuraFileServer go run *.go

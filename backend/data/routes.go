@@ -38,9 +38,9 @@ func UploadFileRoute(w http.ResponseWriter, r *http.Request) {
 
 			err := r.ParseMultipartForm(maxSize)
 			if err != nil {
-				fmt.Println("File to big")
+				fmt.Println("Error while parsing form data")
 				fmt.Println(err)
-				http.Error(w, "file is to big", http.StatusInternalServerError)
+				http.Error(w, "error while retrieving the file", http.StatusInternalServerError)
 				return
 			}
 
@@ -51,9 +51,14 @@ func UploadFileRoute(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "error while retrieving the file", http.StatusInternalServerError)
 				return
 			}
-
 			ending := strings.Split(handler.Filename, ".")
 			fileType := ending[len(ending)-1]
+
+			if len(ending) > 2 {
+				if ending[len(ending)-2] == "tar" && ending[len(ending)-1] == "gz" {
+					fileType = ending[len(ending)-2] + "." + ending[len(ending)-1]
+				}
+			}
 
 			defer file.Close()
 
@@ -77,14 +82,20 @@ func UploadFileRoute(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			tmpFile.Write(bytes)
+			_, err = tmpFile.Write(bytes)
+			if err != nil {
+				fmt.Println("Failed to create temporary file")
+				fmt.Println(err)
+				http.Error(w, "error while uploading the file", http.StatusInternalServerError)
+				return
+			}
 
-			info := File{
+			info := FileInfo{
 				Id:        num,
 				OldName:   handler.Filename,
 				NewName:   tmpFile.Name(),
 				Downloads: 0,
-				Upload:    primitive.NewDateTimeFromTime(time.Now()),
+				Date:      primitive.NewDateTimeFromTime(time.Now()),
 				Type:      fileType,
 				Size:      handler.Size,
 			}
@@ -101,7 +112,13 @@ func UploadFileRoute(w http.ResponseWriter, r *http.Request) {
 
 			fmt.Println("Successfully inserted file info into database")
 
-			http.Error(w, "success", http.StatusOK)
+			err = json.NewEncoder(w).Encode(info)
+			if err != nil {
+				fmt.Println("Failed to send response to user")
+				fmt.Println(err)
+				http.Error(w, "error while sending response", http.StatusInternalServerError)
+				return
+			}
 		}
 	}
 }
@@ -116,18 +133,24 @@ func GetFileInfoRoute(w http.ResponseWriter, r *http.Request) {
 			var params = mux.Vars(r)
 			var id = params["id"]
 
-			var file File
+			var file FileInfo
 
 			filter := bson.M{"id": id}
 			err := fileCollection.FindOne(context.TODO(), filter).Decode(&file)
 			if err != nil {
-				fmt.Println("File with id ", id, " is not available!")
+				fmt.Println("FileInfo with id ", id, " is not available!")
 				fmt.Println(err)
 				http.Error(w, "file not found", http.StatusNotFound)
 				return
 			}
 
-			go json.NewEncoder(w).Encode(file)
+			err = json.NewEncoder(w).Encode(file)
+			if err != nil {
+				fmt.Println("Failed to send file info to user")
+				fmt.Println(err)
+				http.Error(w, "error while sending file info", http.StatusInternalServerError)
+				return
+			}
 		}
 	}
 }
@@ -142,12 +165,12 @@ func GetFileRoute(w http.ResponseWriter, r *http.Request) {
 			var params = mux.Vars(r)
 			var id = params["id"]
 
-			var file File
+			var file FileInfo
 
 			filter := bson.M{"id": id}
 			err := fileCollection.FindOne(context.TODO(), filter).Decode(&file)
 			if err != nil {
-				fmt.Println("File with id ", id, " is not available!")
+				fmt.Println("FileInfo with id ", id, " is not available!")
 				fmt.Println(err)
 				http.Error(w, "file not found", http.StatusNotFound)
 				return
@@ -155,7 +178,13 @@ func GetFileRoute(w http.ResponseWriter, r *http.Request) {
 
 			b, err := ioutil.ReadFile(file.NewName)
 
-			go w.Write(b)
+			_, err = w.Write(b)
+			if err != nil {
+				fmt.Println("Failed to send file to user")
+				fmt.Println(err)
+				http.Error(w, "error while sending file", http.StatusInternalServerError)
+				return
+			}
 		}
 	}
 }
@@ -170,7 +199,7 @@ func AddDownloadRoute(w http.ResponseWriter, r *http.Request) {
 
 			filter := bson.M{"id": id}
 
-			var result File
+			var result FileInfo
 
 			err := fileCollection.FindOne(context.TODO(), bson.D{}).Decode(&result)
 			if err != nil {
@@ -186,7 +215,7 @@ func AddDownloadRoute(w http.ResponseWriter, r *http.Request) {
 					{"oldname", result.OldName},
 					{"newname", result.NewName},
 					{"downloads", result.Downloads + 1},
-					{"upload", result.Upload},
+					{"upload", result.Date},
 					{"type", result.Type},
 					{"size", result.Size},
 				}},
@@ -212,7 +241,12 @@ func AddDownloadRoute(w http.ResponseWriter, r *http.Request) {
 // The length of the sequence is specified by the length argument
 func randNum(length int) string {
 	num := make([]byte, length)
-	rand.Read(num)
+	_, err := rand.Read(num)
+	if err != nil {
+		fmt.Println("Failed to generate random number")
+		fmt.Println(err)
+		return randNum(length)
+	}
 	return fmt.Sprintf("%x", num)
 }
 
