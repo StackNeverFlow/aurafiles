@@ -25,177 +25,186 @@ var (
 // DefaultRoute is used when someone is accessing a default route like "/"
 func DefaultRoute(w http.ResponseWriter, r *http.Request) {
 	newRequest(r)
-
 	http.Error(w, "no content", http.StatusNotFound)
 }
 
 // UploadFileRoute is used when someone is sending a post request to the upload route
 func UploadFileRoute(w http.ResponseWriter, r *http.Request) {
 	newRequest(r)
-	if Auth(w, r) {
-		// maximal size of file
-		var maxSize int64 = 20
+	if CheckRequestLimit(r.RemoteAddr, w) {
+		if Auth(w, r) {
+			// maximal size of file
+			var maxSize int64 = 20
 
-		err := r.ParseMultipartForm(maxSize)
-		if err != nil {
-			fmt.Println("File to big")
-			fmt.Println(err)
-			http.Error(w, "file is to big", http.StatusInternalServerError)
-			return
+			err := r.ParseMultipartForm(maxSize)
+			if err != nil {
+				fmt.Println("File to big")
+				fmt.Println(err)
+				http.Error(w, "file is to big", http.StatusInternalServerError)
+				return
+			}
+
+			file, handler, err := r.FormFile("upload")
+			if err != nil {
+				fmt.Println("Failed to get the file to upload")
+				fmt.Println(err)
+				http.Error(w, "error while retrieving the file", http.StatusInternalServerError)
+				return
+			}
+
+			ending := strings.Split(handler.Filename, ".")
+			fileType := ending[len(ending)-1]
+
+			defer file.Close()
+
+			num := randNum(16)
+			tmpFile, err := ioutil.TempFile("./upload/", "*-"+num+"."+fileType)
+
+			if err != nil {
+				fmt.Println("Failed to create temporary directory")
+				fmt.Println(err)
+				http.Error(w, "error while uploading the file", http.StatusInternalServerError)
+				return
+			}
+
+			defer tmpFile.Close()
+
+			bytes, err := ioutil.ReadAll(file)
+			if err != nil {
+				fmt.Println("Failed to create temporary file")
+				fmt.Println(err)
+				http.Error(w, "error while uploading the file", http.StatusInternalServerError)
+				return
+			}
+
+			tmpFile.Write(bytes)
+
+			info := File{
+				Id:        num,
+				OldName:   handler.Filename,
+				NewName:   tmpFile.Name(),
+				Downloads: 0,
+				Upload:    primitive.NewDateTimeFromTime(time.Now()),
+				Type:      fileType,
+				Size:      handler.Size,
+			}
+
+			fmt.Println(info)
+
+			_, err = fileCollection.InsertOne(context.TODO(), &info)
+			if err != nil {
+				fmt.Println("Failed to insert file info into database")
+				fmt.Println(err)
+				http.Error(w, "error while uploading the file", http.StatusInternalServerError)
+				return
+			}
+
+			fmt.Println("Successfully inserted file info into database")
+
+			http.Error(w, "success", http.StatusOK)
 		}
-
-		file, handler, err := r.FormFile("upload")
-		if err != nil {
-			fmt.Println("Failed to get the file to upload")
-			fmt.Println(err)
-			http.Error(w, "error while retrieving the file", http.StatusInternalServerError)
-			return
-		}
-
-		ending := strings.Split(handler.Filename, ".")
-		fileType := ending[len(ending)-1]
-
-		defer file.Close()
-
-		num := randNum(16)
-		tmpFile, err := ioutil.TempFile("./upload/", "*-"+num+"."+fileType)
-
-		if err != nil {
-			fmt.Println("Failed to create temporary directory")
-			fmt.Println(err)
-			http.Error(w, "error while uploading the file", http.StatusInternalServerError)
-			return
-		}
-
-		defer tmpFile.Close()
-
-		bytes, err := ioutil.ReadAll(file)
-		if err != nil {
-			fmt.Println("Failed to create temporary file")
-			fmt.Println(err)
-			http.Error(w, "error while uploading the file", http.StatusInternalServerError)
-			return
-		}
-
-		tmpFile.Write(bytes)
-
-		info := File{
-			Id:        num,
-			OldName:   handler.Filename,
-			NewName:   tmpFile.Name(),
-			Downloads: 0,
-			Upload:    primitive.NewDateTimeFromTime(time.Now()),
-			Type:      fileType,
-		}
-
-		fmt.Println(info)
-
-		_, err = fileCollection.InsertOne(context.TODO(), &info)
-		if err != nil {
-			fmt.Println("Failed to insert file info into database")
-			fmt.Println(err)
-			http.Error(w, "error while uploading the file", http.StatusInternalServerError)
-			return
-		}
-
-		fmt.Println("Successfully inserted file info into database")
-
-		http.Error(w, "success", http.StatusOK)
 	}
 }
 
 // GetFileInfoRoute is used when someone is requesting information about a uploaded file
 func GetFileInfoRoute(w http.ResponseWriter, r *http.Request) {
 	newRequest(r)
-	if Auth(w, r) {
-		w.Header().Set("connection-type", "application/json")
+	if CheckRequestLimit(r.RemoteAddr, w) {
+		if Auth(w, r) {
+			w.Header().Set("connection-type", "application/json")
 
-		var params = mux.Vars(r)
-		var id = params["id"]
+			var params = mux.Vars(r)
+			var id = params["id"]
 
-		var file File
+			var file File
 
-		filter := bson.M{"id": id}
-		err := fileCollection.FindOne(context.TODO(), filter).Decode(&file)
-		if err != nil {
-			fmt.Println("File with id ", id, " is not available!")
-			fmt.Println(err)
-			http.Error(w, "file not found", http.StatusNotFound)
-			return
+			filter := bson.M{"id": id}
+			err := fileCollection.FindOne(context.TODO(), filter).Decode(&file)
+			if err != nil {
+				fmt.Println("File with id ", id, " is not available!")
+				fmt.Println(err)
+				http.Error(w, "file not found", http.StatusNotFound)
+				return
+			}
+
+			go json.NewEncoder(w).Encode(file)
 		}
-
-		json.NewEncoder(w).Encode(file)
 	}
 }
 
 // GetFileRoute is used when someone is requesting a file
 func GetFileRoute(w http.ResponseWriter, r *http.Request) {
 	newRequest(r)
-	//if Auth(w, r) {
-	w.Header().Set("connection-type", "application/json")
+	if CheckRequestLimit(r.RemoteAddr, w) {
+		if Auth(w, r) {
+			w.Header().Set("connection-type", "application/json")
 
-	var params = mux.Vars(r)
-	var id = params["id"]
+			var params = mux.Vars(r)
+			var id = params["id"]
 
-	var file File
+			var file File
 
-	filter := bson.M{"id": id}
-	err := fileCollection.FindOne(context.TODO(), filter).Decode(&file)
-	if err != nil {
-		fmt.Println("File with id ", id, " is not available!")
-		fmt.Println(err)
-		http.Error(w, "file not found", http.StatusNotFound)
-		return
+			filter := bson.M{"id": id}
+			err := fileCollection.FindOne(context.TODO(), filter).Decode(&file)
+			if err != nil {
+				fmt.Println("File with id ", id, " is not available!")
+				fmt.Println(err)
+				http.Error(w, "file not found", http.StatusNotFound)
+				return
+			}
+
+			b, err := ioutil.ReadFile(file.NewName)
+
+			go w.Write(b)
+		}
 	}
-
-	b, err := ioutil.ReadFile(file.NewName)
-
-	w.Write(b)
-	//}
 }
 
 // AddDownloadRoute is used when someone is adding a download to a file
 func AddDownloadRoute(w http.ResponseWriter, r *http.Request) {
 	newRequest(r)
-	if Auth(w, r) {
-		params := mux.Vars(r)
-		id := params["id"]
+	if CheckRequestLimit(r.RemoteAddr, w) {
+		if Auth(w, r) {
+			params := mux.Vars(r)
+			id := params["id"]
 
-		filter := bson.M{"id": id}
+			filter := bson.M{"id": id}
 
-		var result File
+			var result File
 
-		err := fileCollection.FindOne(context.TODO(), bson.D{}).Decode(&result)
-		if err != nil {
-			fmt.Println("Failed to get info about file ", id)
-			fmt.Println(err)
-			http.Error(w, "unknown id", http.StatusNotFound)
-			return
+			err := fileCollection.FindOne(context.TODO(), bson.D{}).Decode(&result)
+			if err != nil {
+				fmt.Println("Failed to get info about file ", id)
+				fmt.Println(err)
+				http.Error(w, "unknown id", http.StatusNotFound)
+				return
+			}
+
+			update := bson.D{
+				{"$set", bson.D{
+					{"id", id},
+					{"oldname", result.OldName},
+					{"newname", result.NewName},
+					{"downloads", result.Downloads + 1},
+					{"upload", result.Upload},
+					{"type", result.Type},
+					{"size", result.Size},
+				}},
+			}
+
+			res := fileCollection.FindOneAndUpdate(context.TODO(), filter, update)
+
+			if res.Err() == mongo.ErrNoDocuments {
+				fmt.Println("Unknown id ", id)
+				fmt.Println(res.Err())
+				http.Error(w, "unknown id", http.StatusNotFound)
+				return
+			}
+
+			fmt.Println("Successfully increased the download amount of file "+id+" to ", result.Downloads+1)
+
+			http.Error(w, "success", http.StatusOK)
 		}
-
-		update := bson.D{
-			{"$set", bson.D{
-				{"id", id},
-				{"oldname", result.OldName},
-				{"newname", result.NewName},
-				{"downloads", result.Downloads + 1},
-				{"upload", result.Upload},
-				{"type", result.Type},
-			}},
-		}
-
-		res := fileCollection.FindOneAndUpdate(context.TODO(), filter, update)
-
-		if res.Err() == mongo.ErrNoDocuments {
-			fmt.Println("Unknown id ", id)
-			fmt.Println(res.Err())
-			http.Error(w, "unknown id", http.StatusNotFound)
-			return
-		}
-
-		fmt.Println("Successfully increased the download amount of file "+id+" to ", result.Downloads+1)
-
-		http.Error(w, "success", http.StatusOK)
 	}
 }
 
