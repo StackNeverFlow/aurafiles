@@ -63,6 +63,7 @@ func UploadFileRoute(w http.ResponseWriter, r *http.Request) {
 			defer file.Close()
 
 			num := randNum(16)
+
 			tmpFile, err := ioutil.TempFile("./upload/", "*-"+num+"."+fileType)
 
 			if err != nil {
